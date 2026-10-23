@@ -15,11 +15,20 @@ mod watch;
 mod worker;
 
 fn main() -> eframe::Result {
-    // The browser launches us with an nxm:// link; hand it to a running window if there is one.
-    let nxm_link = std::env::args().skip(1).find(|a| a.starts_with("nxm://"));
-    if let Some(link) = &nxm_link
-        && nxm::forward_to_running(link)
-    {
+    // The browser or file manager launches us with nxm:// links or archives
+    // ("Open with"); hand them to a running window if there is one.
+    let handoff: Vec<String> = std::env::args()
+        .skip(1)
+        .filter_map(|arg| {
+            if arg.starts_with("nxm://") {
+                return Some(arg);
+            }
+            let path = std::path::Path::new(&arg);
+            (archive::is_supported(path) && path.is_file())
+                .then(|| std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()).display().to_string())
+        })
+        .collect();
+    if !handoff.is_empty() && handoff.iter().all(|arg| nxm::forward_to_running(arg)) {
         return Ok(());
     }
 
@@ -34,6 +43,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Cyber Mod Manager",
         options,
-        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, nxm_link)?))),
+        Box::new(move |cc| Ok(Box::new(ui::App::new(cc, handoff)?))),
     )
 }

@@ -1,4 +1,5 @@
-//! `nxm://` links (Nexus "Mod Manager Download" button) and single-instance hand-off.
+//! `nxm://` links (Nexus "Mod Manager Download" button), the "Open with"
+//! desktop entry, and single-instance hand-off of both.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -42,7 +43,7 @@ impl NxmLink {
     }
 }
 
-/// Try handing `link` to a running instance. Returns true if one accepted it.
+/// Try handing `link` (an nxm:// link or archive path) to a running instance. Returns true if one accepted it.
 pub fn forward_to_running(link: &str) -> bool {
     let Ok(mut stream) = UnixStream::connect(crate::paths::AppPaths::ipc_socket()) else {
         return false;
@@ -97,6 +98,46 @@ pub fn register_handler() -> Result<PathBuf> {
     }
     let _ = Command::new("update-desktop-database").arg(&apps).status();
     Ok(desktop)
+}
+
+const OPEN_WITH_FILE: &str = "cyber-mod-manager.desktop";
+const ARCHIVE_TYPES: &str =
+    "application/zip;application/x-7z-compressed;application/vnd.rar;application/x-rar;application/x-rar-compressed;";
+
+fn open_with_path() -> Result<PathBuf> {
+    Ok(directories::BaseDirs::new().context("no home directory")?.data_dir().join("applications").join(OPEN_WITH_FILE))
+}
+
+pub fn open_with_registered() -> bool {
+    open_with_path().is_ok_and(|p| p.is_file())
+}
+
+/// Offer this app under "Open with" for mod archives, without making it the
+/// default for them (archives keep opening in the usual app).
+pub fn register_open_with() -> Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    let desktop = open_with_path()?;
+    let apps = desktop.parent().context("no applications dir")?;
+    std::fs::create_dir_all(apps)?;
+    let content = format!(
+        "[Desktop Entry]\nType=Application\nName=Cyber Mod Manager\nComment=Install Cyberpunk 2077 mods\n\
+         Exec=\"{}\" %F\nMimeType={ARCHIVE_TYPES}\nCategories=Game;Utility;\nTerminal=false\n",
+        exe.display()
+    );
+    std::fs::write(&desktop, content)?;
+    let _ = Command::new("update-desktop-database").arg(apps).status();
+    Ok(desktop)
+}
+
+pub fn unregister_open_with() -> Result<()> {
+    let desktop = open_with_path()?;
+    if desktop.is_file() {
+        std::fs::remove_file(&desktop)?;
+    }
+    if let Some(apps) = desktop.parent() {
+        let _ = Command::new("update-desktop-database").arg(apps).status();
+    }
+    Ok(())
 }
 
 #[cfg(test)]

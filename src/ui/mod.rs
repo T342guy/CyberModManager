@@ -90,7 +90,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, nxm_link: Option<String>) -> anyhow::Result<Self> {
+    pub fn new(cc: &eframe::CreationContext<'_>, handoff: Vec<String>) -> anyhow::Result<Self> {
         let paths = AppPaths::discover()?;
         let (notifier, events) = Notifier::new(cc.egui_ctx.clone());
         let mut startup_log = Vec::new();
@@ -114,11 +114,11 @@ impl App {
         let jobs = worker::spawn(paths.registry_file(), dirs, notifier.clone());
 
         let link_notifier = notifier.clone();
-        if let Err(e) = crate::nxm::listen(move |link| link_notifier.send(Event::Nxm(link))) {
-            startup_log.push((Level::Warn, format!("nxm:// links from the browser won't reach this window: {e:#}")));
+        if let Err(e) = crate::nxm::listen(move |arg| link_notifier.send(Event::Handoff(arg))) {
+            startup_log.push((Level::Warn, format!("nxm:// links and \"Open with\" won't reach this window: {e:#}")));
         }
-        if let Some(link) = nxm_link {
-            notifier.send(Event::Nxm(link));
+        for arg in handoff {
+            notifier.send(Event::Handoff(arg));
         }
 
         let startup_check = config.check_updates_on_start;
@@ -192,7 +192,7 @@ impl App {
     }
 
     fn restart_watcher(&mut self) {
-        self.watcher = self.config.watch_downloads.then(|| self.watch_dir()).flatten().map(crate::watch::Watcher::new);
+        self.watcher = self.config.watch_downloads.then(|| self.watch_dir()).flatten().map(|dir| crate::watch::Watcher::new(dir, self.config.watch_any_archive));
     }
 
     fn holding_dir(&self) -> PathBuf {
@@ -241,7 +241,8 @@ impl App {
                     }
                 }
                 Event::Log(level, msg) => self.push_log(level, msg),
-                Event::Nxm(link) => self.handle_nxm(&link),
+                Event::Handoff(arg) if arg.starts_with("nxm://") => self.handle_nxm(&arg),
+                Event::Handoff(path) => self.queue_archives(vec![PathBuf::from(path)]),
                 Event::NexusUser(res) => match res {
                     Ok(user) => {
                         self.push_log(

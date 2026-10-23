@@ -9,6 +9,8 @@ A small native (egui) mod manager for Cyberpunk 2077 on Linux (Steam / Proton).
 - **Nexus Mods**:
   - Any account: turn on **Install Nexus downloads automatically** (Nexus tab), then click **Manual download** on a mod's Files tab. The app spots the archive in your download folder and installs it, linked to its Nexus page for update checks.
   - **Mod Manager Download** links (nxm://) are handled too, where Nexus allows them for your account.
+  - Saving mods to a folder of their own? Tick **Take any archive** and renamed files or mods from other sites install too.
+- **Open with**: tick *Show in "Open with"* in Settings, then right-click any .zip/.7z/.rar in your file manager or browser downloads → *Open with → Cyber Mod Manager*. It goes to the running window (or starts the app). Your usual archive app stays the default.
   - Premium accounts: paste a mod URL or ID, pick a file, and install it directly.
 - **Frameworks in one click**: *🧩 Frameworks…* installs Cyber Engine Tweaks, RED4ext, redscript, TweakXL, ArchiveXL, Codeware, Mod Settings and Input Loader from their official GitHub releases. No Nexus account is needed, and missing dependencies are added automatically (e.g. TweakXL brings RED4ext and redscript).
 - **Update checker** (*⟳ Check for updates*, also runs at startup; can be turned off in Settings):

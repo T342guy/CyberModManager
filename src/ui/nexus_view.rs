@@ -57,10 +57,22 @@ impl App {
                 self.restart_watcher();
             }
         });
+        if ui
+            .checkbox(&mut self.config.watch_any_archive, "Take any archive, not just Nexus-named ones")
+            .on_hover_text(
+                "For a folder your browser saves only mods into: renamed files and mods from other sites \
+                 install too. Don't use it on your general Downloads folder.",
+            )
+            .changed()
+        {
+            self.save_config();
+            self.restart_watcher();
+        }
         ui.weak(
             "Works with any account: click \"Manual download\" on a mod's Files tab and it installs as soon as \
-             the browser finishes saving it, linked to its Nexus page for update checks. Only archives with \
-             Nexus-style names (Name-12345-1-0-….zip) that arrive while the app is open are picked up.",
+             the browser finishes saving it, linked to its Nexus page for update checks. Only archives that \
+             arrive while the app is open are picked up, and only Nexus-style names (Name-12345-1-0-….zip) \
+             unless you tick \"any archive\". Tip: point it at a folder just for mods.",
         );
         ui.add_space(6.0);
         if ui.button("Register as nxm:// link handler").on_hover_text(

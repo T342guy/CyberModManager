@@ -22,6 +22,8 @@ pub struct Config {
     pub watch_downloads: bool,
     /// Folder to watch; the system download folder when unset.
     pub downloads_dir: Option<PathBuf>,
+    /// Install every archive that lands there, not just Nexus-named ones.
+    pub watch_any_archive: bool,
 }
 
 impl Default for Config {
@@ -35,6 +37,7 @@ impl Default for Config {
             check_updates_on_start: true,
             watch_downloads: false,
             downloads_dir: None,
+            watch_any_archive: false,
         }
     }
 }

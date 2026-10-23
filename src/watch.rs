@@ -17,16 +17,18 @@ pub struct Watcher {
     /// New files still being written: size at the last look.
     growing: HashMap<PathBuf, u64>,
     last_scan: Instant,
+    /// Take any archive, not just Nexus-named ones (for a mods-only folder).
+    any_archive: bool,
 }
 
 impl Watcher {
     /// Start watching `dir`. Archives already there are left alone.
-    pub fn new(dir: PathBuf) -> Self {
+    pub fn new(dir: PathBuf, any_archive: bool) -> Self {
         let seen = archives(&dir).into_iter().map(|(p, _)| p).collect();
-        Self { dir, seen, growing: HashMap::new(), last_scan: Instant::now() }
+        Self { dir, seen, growing: HashMap::new(), last_scan: Instant::now(), any_archive }
     }
 
-    /// New Nexus downloads that finished since the last call. Cheap to call
+    /// New downloads that finished since the last call. Cheap to call
     /// every frame; the folder is only listed every couple of seconds.
     pub fn poll(&mut self) -> Vec<PathBuf> {
         if self.last_scan.elapsed() < INTERVAL {
@@ -46,7 +48,7 @@ impl Watcher {
             // Only call a file finished once its size held still between two looks.
             if size > 0 && self.growing.get(&path) == Some(&size) {
                 self.seen.insert(path.clone());
-                if is_nexus_download(&path) {
+                if self.any_archive || is_nexus_download(&path) {
                     ready.push(path);
                 }
             } else {
@@ -86,7 +88,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let old = dir.path().join("Old Mod-100-1-0-1700000000.zip");
         fs::write(&old, "old").unwrap();
-        let mut w = Watcher::new(dir.path().to_path_buf());
+        let mut w = Watcher::new(dir.path().to_path_buf(), false);
 
         let new = dir.path().join("Cool Mod-12345-1-2-1760000000.zip");
         fs::write(&new, "part").unwrap();
@@ -97,5 +99,16 @@ mod tests {
         assert!(w.scan().is_empty(), "still growing");
         assert_eq!(w.scan(), std::slice::from_ref(&new));
         assert!(w.scan().is_empty(), "reported once");
+    }
+
+    #[test]
+    fn any_archive_mode_takes_renamed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut w = Watcher::new(dir.path().to_path_buf(), true);
+        let renamed = dir.path().join("my favourite mod.7z");
+        fs::write(&renamed, "x").unwrap();
+        fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        assert!(w.scan().is_empty());
+        assert_eq!(w.scan(), std::slice::from_ref(&renamed));
     }
 }

@@ -64,7 +64,8 @@ pub enum Event {
     Item { item: u64, status: ItemStatus },
     Conflicts { id: String, name: String, conflicts: Vec<Conflict> },
     Log(Level, String),
-    Nxm(String),
+    /// An nxm:// link or archive path from another launch of the app.
+    Handoff(String),
     NexusUser(Result<User, String>),
     NexusFiles { mod_id: u64, info: ModInfo, list: FileList },
     Updates(Vec<UpdateInfo>),

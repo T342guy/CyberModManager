@@ -77,6 +77,28 @@ impl App {
         }
 
         ui.add_space(10.0);
+        ui.heading("Desktop");
+        let mut open_with = crate::nxm::open_with_registered();
+        if ui
+            .checkbox(&mut open_with, "Show in \"Open with\" for .zip / .7z / .rar files")
+            .on_hover_text(
+                "Right-click an archive in your file manager or browser downloads and pick Cyber Mod Manager to \
+                 install it. Your usual archive app stays the default.",
+            )
+            .changed()
+        {
+            let result = if open_with {
+                crate::nxm::register_open_with().map(|p| format!("Added to \"Open with\" ({})", p.display()))
+            } else {
+                crate::nxm::unregister_open_with().map(|()| "Removed from \"Open with\"".to_string())
+            };
+            match result {
+                Ok(msg) => self.push_log(Level::Info, msg),
+                Err(e) => self.push_log(Level::Error, format!("Updating \"Open with\" failed: {e:#}")),
+            }
+        }
+
+        ui.add_space(10.0);
         ui.heading("App data");
         ui.horizontal_wrapped(|ui| {
             ui.monospace(self.paths.data_dir.display().to_string());
