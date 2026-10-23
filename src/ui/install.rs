@@ -15,6 +15,19 @@ impl App {
         }
     }
 
+    /// Queue archives the download-folder watcher found.
+    pub(super) fn poll_downloads(&mut self) {
+        let Some(found) = self.watcher.as_mut().map(|w| w.poll()) else { return };
+        for path in found {
+            let meta = InstallMeta::from_archive_name(&path);
+            self.push_log(Level::Info, format!("New Nexus download: {}, installing", meta.name));
+            let item = self.new_item(meta.name.clone());
+            let (overwrite, delete_after) = (self.config.always_overwrite, self.config.delete_downloads);
+            self.send(Job::Install { item, path, meta, overwrite, delete_after });
+            self.tab = Tab::Install;
+        }
+    }
+
     /// Batch mode: queue every archive; the worker installs them one by one.
     pub(super) fn queue_archives(&mut self, paths: Vec<PathBuf>) {
         let mut added = 0;

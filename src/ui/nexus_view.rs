@@ -32,15 +32,37 @@ impl App {
                 ui.label(format!("Signed in as {} (Premium): direct downloads are available.", u.name));
             }
             Some(u) => {
-                ui.label(format!(
-                    "Signed in as {}. Free accounts install through the \"Mod Manager Download\" button on Nexus.",
-                    u.name
-                ));
+                ui.label(format!("Signed in as {} (free account).", u.name));
             }
             None => {
                 ui.weak("Not signed in.");
             }
         }
+
+        ui.add_space(6.0);
+        ui.strong("Automatic install from your browser");
+        ui.horizontal_wrapped(|ui| {
+            if ui.checkbox(&mut self.config.watch_downloads, "Install Nexus downloads automatically").changed() {
+                self.save_config();
+                self.restart_watcher();
+            }
+            let dir = self.watch_dir().map(|d| d.display().to_string()).unwrap_or_else(|| "no folder set".into());
+            ui.weak("from");
+            ui.monospace(dir);
+            if ui.button("Change…").clicked()
+                && let Some(dir) = rfd::FileDialog::new().set_title("Folder your browser downloads to").pick_folder()
+            {
+                self.config.downloads_dir = Some(dir);
+                self.save_config();
+                self.restart_watcher();
+            }
+        });
+        ui.weak(
+            "Works with any account: click \"Manual download\" on a mod's Files tab and it installs as soon as \
+             the browser finishes saving it, linked to its Nexus page for update checks. Only archives with \
+             Nexus-style names (Name-12345-1-0-….zip) that arrive while the app is open are picked up.",
+        );
+        ui.add_space(6.0);
         if ui.button("Register as nxm:// link handler").on_hover_text(
             "Makes the \"Mod Manager Download\" button on nexusmods.com open this app.",
         ).clicked() {

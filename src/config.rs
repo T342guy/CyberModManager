@@ -18,6 +18,10 @@ pub struct Config {
     pub delete_downloads: bool,
     /// Look for mod updates (GitHub frameworks, Nexus-linked mods) at startup.
     pub check_updates_on_start: bool,
+    /// Install Nexus archives as soon as the browser saves them.
+    pub watch_downloads: bool,
+    /// Folder to watch; the system download folder when unset.
+    pub downloads_dir: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -29,6 +33,8 @@ impl Default for Config {
             always_overwrite: false,
             delete_downloads: false,
             check_updates_on_start: true,
+            watch_downloads: false,
+            downloads_dir: None,
         }
     }
 }

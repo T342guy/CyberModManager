@@ -85,6 +85,8 @@ pub struct App {
 
     game_running: bool,
     last_game_check: Instant,
+    /// Download-folder watcher, when enabled.
+    watcher: Option<crate::watch::Watcher>,
 }
 
 impl App {
@@ -148,7 +150,9 @@ impl App {
             startup_check_pending: startup_check,
             game_running: false,
             last_game_check: Instant::now() - Duration::from_secs(60),
+            watcher: None,
         };
+        app.restart_watcher();
         for (level, msg) in startup_log {
             app.push_log(level, msg);
         }
@@ -178,6 +182,17 @@ impl App {
         if let Err(e) = self.config.save(&self.paths.config_file) {
             self.push_log(Level::Error, format!("Saving settings failed: {e:#}"));
         }
+    }
+
+    /// The folder the browser saves to: the configured one or the system default.
+    fn watch_dir(&self) -> Option<PathBuf> {
+        self.config.downloads_dir.clone().or_else(|| {
+            directories::UserDirs::new().and_then(|u| u.download_dir().map(|d| d.to_path_buf()))
+        })
+    }
+
+    fn restart_watcher(&mut self) {
+        self.watcher = self.config.watch_downloads.then(|| self.watch_dir()).flatten().map(crate::watch::Watcher::new);
     }
 
     fn holding_dir(&self) -> PathBuf {
@@ -502,8 +517,9 @@ impl eframe::App for App {
         self.handle_events();
         self.handle_drops(ctx);
         self.check_game_running();
-        // Keep polling the game process occasionally even when idle.
-        ctx.request_repaint_after(Duration::from_secs(5));
+        self.poll_downloads();
+        // Keep polling the game process (and download folder) even when idle.
+        ctx.request_repaint_after(Duration::from_secs(if self.watcher.is_some() { 2 } else { 5 }));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

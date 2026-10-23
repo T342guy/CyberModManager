@@ -11,6 +11,7 @@ mod ops;
 mod paths;
 mod registry;
 mod ui;
+mod watch;
 mod worker;
 
 fn main() -> eframe::Result {

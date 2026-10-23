@@ -7,12 +7,13 @@ A small native (egui) mod manager for Cyberpunk 2077 on Linux (Steam / Proton).
 
 - **Batch install**: pick or drag in any number of `.zip` / `.7z` / `.rar` archives. They install one after another, and one failure doesn't stop the rest.
 - **Nexus Mods**:
-  - Free accounts: click **Mod Manager Download** on nexusmods.com and the mod installs automatically (nxm:// handler).
+  - Any account: turn on **Install Nexus downloads automatically** (Nexus tab), then click **Manual download** on a mod's Files tab. The app spots the archive in your download folder and installs it, linked to its Nexus page for update checks.
+  - **Mod Manager Download** links (nxm://) are handled too, where Nexus allows them for your account.
   - Premium accounts: paste a mod URL or ID, pick a file, and install it directly.
 - **Frameworks in one click**: *🧩 Frameworks…* installs Cyber Engine Tweaks, RED4ext, redscript, TweakXL, ArchiveXL, Codeware, Mod Settings and Input Loader from their official GitHub releases. No Nexus account is needed, and missing dependencies are added automatically (e.g. TweakXL brings RED4ext and redscript).
 - **Update checker** (*⟳ Check for updates*, also runs at startup; can be turned off in Settings):
   - Frameworks are checked against their latest GitHub release and update with one click.
-  - Mods linked to Nexus are checked with your API key. Premium updates in one click; free accounts get the files page opened for "Mod Manager Download".
+  - Mods linked to Nexus are checked with your API key. Premium updates in one click; free accounts get the files page opened, and the download installs itself.
   - Mods installed from Nexus or from Nexus-named archives (`Name-1234-1-0-...zip`) are linked automatically. Link any other mod by pasting its Nexus URL in its details panel.
 - **Enable / disable**: disabled mods are moved out of the game into a holding folder, and moved back when you re-enable them.
 - **Remove**: deletes the mod's files wherever they are.
