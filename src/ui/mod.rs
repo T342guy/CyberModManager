@@ -516,7 +516,7 @@ impl eframe::App for App {
                 ui.separator();
                 let enabled = self.mods.iter().filter(|m| m.enabled).count();
                 ui.selectable_value(&mut self.tab, Tab::Mods, format!("Mods ({enabled}/{})", self.mods.len()));
-                let active = self.queue.iter().filter(|q| !matches!(q.status, ItemStatus::Done | ItemStatus::Failed(_))).count();
+                let active = self.queue.iter().filter(|q| !matches!(q.status, ItemStatus::Done | ItemStatus::Skipped(_) | ItemStatus::Failed(_))).count();
                 let install_label = if active > 0 { format!("Install ({active})") } else { "Install".into() };
                 ui.selectable_value(&mut self.tab, Tab::Install, install_label);
                 let nexus_label = if self.updates.is_empty() { "Nexus".to_string() } else { format!("Nexus ({} updates)", self.updates.len()) };

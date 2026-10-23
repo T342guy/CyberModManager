@@ -93,7 +93,12 @@ impl App {
             });
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
-                let label = format!("Install selected ({})", self.fw_picked.len());
+                let any_installed = CATALOG
+                    .iter()
+                    .zip(&states)
+                    .any(|(fw, st)| self.fw_picked.contains(&fw.name) && matches!(st, FrameworkState::Managed { .. }));
+                let verb = if any_installed { "Install / update" } else { "Install" };
+                let label = format!("{verb} selected ({})", self.fw_picked.len());
                 if ui.add_enabled(!self.fw_picked.is_empty(), egui::Button::new(label)).clicked() {
                     install = true;
                 }

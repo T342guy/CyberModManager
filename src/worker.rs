@@ -32,6 +32,8 @@ pub enum ItemStatus {
     Downloading(f32),
     Installing,
     Done,
+    /// Nothing to do, with the reason shown in the queue.
+    Skipped(String),
     NeedsDecision,
     Failed(String),
 }
@@ -367,9 +369,10 @@ pub fn spawn_framework_install(jobs_in: Vec<FrameworkJob>, opts: InstallOpts, jo
                 if let [current] = existing.as_slice()
                     && current.version.as_deref().is_some_and(|v| frameworks::same_version(v, &release.version()))
                 {
-                    n.item(item, ItemStatus::Done);
-                    let hint = if current.enabled { "" } else { " (it's disabled; enable it in the Mods tab)" };
-                    n.log(Level::Info, format!("{} {} is already installed{hint}, skipped", fw.name, release.version()));
+                    let hint = if current.enabled { "" } else { ", but disabled: enable it in the Mods tab" };
+                    let msg = format!("already installed and up to date ({}){hint}", release.version());
+                    n.log(Level::Info, format!("{}: {msg}, skipped", fw.name));
+                    n.item(item, ItemStatus::Skipped(msg));
                     return Ok(());
                 }
                 let asset = frameworks::pick_asset(release.assets.iter().map(|a| a.name.as_str()))

@@ -39,7 +39,7 @@ impl App {
                 self.pick_archives();
             }
             if ui.button("Clear finished").clicked() {
-                self.queue.retain(|q| !matches!(q.status, ItemStatus::Done | ItemStatus::Failed(_)));
+                self.queue.retain(|q| !matches!(q.status, ItemStatus::Done | ItemStatus::Skipped(_) | ItemStatus::Failed(_)));
             }
             ui.checkbox(&mut self.config.always_overwrite, "Newer mods overwrite conflicts without asking")
                 .changed()
@@ -72,6 +72,9 @@ impl App {
                         }
                         ItemStatus::Done => {
                             ui.colored_label(egui::Color32::from_rgb(90, 200, 120), "installed");
+                        }
+                        ItemStatus::Skipped(why) => {
+                            ui.colored_label(ui.visuals().warn_fg_color, format!("skipped: {why}"));
                         }
                         ItemStatus::NeedsDecision => {
                             ui.colored_label(ui.visuals().warn_fg_color, "conflict, waiting for your choice");
