@@ -34,7 +34,7 @@ impl App {
     }
 
     pub(super) fn install_tab(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("➕ Add archives…").clicked() {
                 self.pick_archives();
             }
@@ -53,7 +53,7 @@ impl App {
             ui.vertical_centered(|ui| ui.label("Nothing queued."));
             return;
         }
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             egui::Grid::new("queue").striped(true).num_columns(2).spacing([14.0, 6.0]).show(ui, |ui| {
                 for q in self.queue.iter().rev() {
                     ui.label(&q.label);

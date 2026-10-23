@@ -5,7 +5,7 @@ use crate::worker::{Job, Level, UpdateSource};
 
 impl App {
     pub(super) fn mods_tab(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("➕ Add archives…").clicked() {
                 self.pick_archives();
             }
@@ -52,7 +52,7 @@ impl App {
         let filter = self.filter.to_lowercase();
         let mut actions: Vec<Job> = Vec::new();
         let mut update = None;
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             egui::Grid::new("mods").striped(true).num_columns(6).spacing([14.0, 6.0]).show(ui, |ui| {
                 ui.strong("On");
                 ui.strong("Name");
@@ -148,7 +148,7 @@ impl App {
             self.selected = None;
             return;
         };
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.heading(&m.name);
             if ui.small_button("✖").clicked() {
                 self.selected = None;
@@ -157,7 +157,7 @@ impl App {
         if let Some(a) = &m.archive {
             ui.weak(format!("from {a}"));
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if let Some(u) = self.updates.get(&m.id) {
                 let premium = self.nexus_user.as_ref().is_some_and(|u| u.is_premium);
                 let automatic = match u.source {
@@ -183,7 +183,7 @@ impl App {
             }
         });
         if m.github.is_none() {
-            ui.horizontal(|ui| match &m.nexus {
+            ui.horizontal_wrapped(|ui| match &m.nexus {
                 Some(n) => {
                     ui.weak(format!("Linked to Nexus mod {}", n.mod_id));
                     if ui.small_button("Unlink").clicked() {
@@ -211,7 +211,7 @@ impl App {
             });
         }
         ui.separator();
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             for f in &m.files {
                 let mut text = RichText::new(f).monospace();
                 if m.overridden.contains(f) {

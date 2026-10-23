@@ -7,8 +7,12 @@ use crate::worker::{self, Level, NexusRequest};
 
 impl App {
     pub(super) fn nexus_tab(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.nexus_contents(ui));
+    }
+
+    fn nexus_contents(&mut self, ui: &mut egui::Ui) {
         ui.heading("Account");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("API key:");
             ui.add(egui::TextEdit::singleline(&mut self.api_key_input).password(true).desired_width(320.0));
             if ui.button("Save & check").clicked() {
@@ -48,7 +52,7 @@ impl App {
 
         ui.separator();
         ui.heading("Updates");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let tracked = self.mods.iter().filter(|m| m.nexus.is_some()).count();
             if ui.button("Check for updates").clicked() {
                 self.check_updates(true);
@@ -74,7 +78,7 @@ impl App {
 
         ui.separator();
         ui.heading("Install from Nexus");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Mod URL or ID:");
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.nexus_input)
@@ -94,7 +98,7 @@ impl App {
 
         let Some((mod_id, info, list)) = self.nexus_files.clone() else { return };
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(info.name.clone().unwrap_or(format!("Mod {mod_id}"))).strong());
             if let Some(v) = &info.version {
                 ui.weak(format!("v{v}"));
@@ -115,7 +119,7 @@ impl App {
             }
         }
         let mut install = None;
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        egui::ScrollArea::horizontal().id_salt("nexus-files-scroll").show(ui, |ui| {
             egui::Grid::new("nexus-files").striped(true).num_columns(5).spacing([12.0, 6.0]).show(ui, |ui| {
                 for f in list.visible() {
                     ui.label(&f.name);

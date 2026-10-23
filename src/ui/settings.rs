@@ -4,14 +4,18 @@ use crate::worker::{Job, Level};
 
 impl App {
     pub(super) fn settings_tab(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.settings_contents(ui));
+    }
+
+    fn settings_contents(&mut self, ui: &mut egui::Ui) {
         ui.heading("Game folder");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             match &self.config.game_dir {
                 Some(d) => ui.monospace(d.display().to_string()),
                 None => ui.colored_label(ui.visuals().warn_fg_color, "not set"),
             };
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Auto-detect (Steam)").clicked() {
                 match crate::game::detect() {
                     Some(dir) => self.set_game_dir(dir),
@@ -39,7 +43,7 @@ impl App {
         let holding = self.holding_dir();
         ui.monospace(holding.display().to_string());
         ui.weak("Tip: put this on the same drive as the game so enabling/disabling is instant.");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Change…").clicked()
                 && let Some(dir) = rfd::FileDialog::new().set_title("Holding folder").pick_folder()
             {
@@ -74,7 +78,7 @@ impl App {
 
         ui.add_space(10.0);
         ui.heading("App data");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.monospace(self.paths.data_dir.display().to_string());
             if ui.button("Open").clicked() {
                 open_path(&self.paths.data_dir);

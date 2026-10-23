@@ -375,16 +375,16 @@ impl App {
         let Some(pending) = self.conflicts.front() else { return };
         let mut choice = None;
         egui::Modal::new(egui::Id::unique("conflict")).show(ctx, |ui| {
-            ui.set_max_width(560.0);
+            let body = fit_modal(ui, 560.0);
             ui.heading(format!("{} conflicts with installed mods", pending.name));
-            ui.label("These files are already provided by another enabled mod:");
-            egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(body).show(ui, |ui| {
+                ui.label("These files are already provided by another enabled mod:");
                 for c in &pending.conflicts {
                     ui.label(format!("{}  ←  {}", c.file, c.other_name));
                 }
             });
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("Overwrite (new mod wins)").clicked() {
                     choice = Some(0);
                 }
@@ -412,10 +412,11 @@ impl App {
         let name = self.mods.iter().find(|m| m.id == id).map(|m| m.name.clone()).unwrap_or(id.clone());
         let mut close = false;
         egui::Modal::new(egui::Id::unique("confirm-remove")).show(ctx, |ui| {
+            fit_modal(ui, 480.0);
             ui.heading("Remove mod?");
             ui.label(format!("{name} will be deleted from the game folder and the holding folder."));
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button(RichText::new("Remove").color(ui.visuals().error_fg_color)).clicked() {
                     self.send(Job::Remove { id: id.clone() });
                     if self.selected.as_ref() == Some(&id) {
@@ -437,28 +438,28 @@ impl App {
         let Some(groups) = self.untracked.as_mut() else { return };
         let mut decision = None;
         egui::Modal::new(egui::Id::unique("untracked")).show(ctx, |ui| {
-            ui.set_max_width(620.0);
+            let body = fit_modal(ui, 620.0);
             ui.heading("Untracked mod files");
-            ui.label(
-                "These files are in the game's mod folders but the manager doesn't know about them \
-                 (e.g. mods installed by hand). Adopt them to disable or remove them like any other mod.",
-            );
-            ui.horizontal(|ui| {
-                if ui.small_button("Select all").clicked() {
-                    groups.iter_mut().for_each(|g| g.2 = true);
-                }
-                if ui.small_button("Select none").clicked() {
-                    groups.iter_mut().for_each(|g| g.2 = false);
-                }
-            });
-            egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(body).show(ui, |ui| {
+                ui.label(
+                    "These files are in the game's mod folders but the manager doesn't know about them \
+                     (e.g. mods installed by hand). Adopt them to disable or remove them like any other mod.",
+                );
+                ui.horizontal(|ui| {
+                    if ui.small_button("Select all").clicked() {
+                        groups.iter_mut().for_each(|g| g.2 = true);
+                    }
+                    if ui.small_button("Select none").clicked() {
+                        groups.iter_mut().for_each(|g| g.2 = false);
+                    }
+                });
                 for (name, files, selected) in groups.iter_mut() {
                     ui.checkbox(selected, format!("{name}  ({} files)", files.len()))
                         .on_hover_text(files.iter().take(15).cloned().collect::<Vec<_>>().join("\n"));
                 }
             });
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("Adopt selected").clicked() {
                     decision = Some(true);
                 }
@@ -508,7 +509,7 @@ impl eframe::App for App {
 
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.heading(RichText::new("Cyber Mod Manager").color(Color32::from_rgb(252, 238, 10)));
                 ui.separator();
                 let enabled = self.mods.iter().filter(|m| m.enabled).count();
@@ -533,7 +534,9 @@ impl eframe::App for App {
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| match &self.status {
                 Some((level, msg)) => {
-                    ui.colored_label(level_color(ui, *level), msg);
+                    // Long messages are cut off here; the Log tab has them in full.
+                    ui.add(egui::Label::new(RichText::new(msg).color(level_color(ui, *level))).truncate())
+                        .on_hover_text(msg);
                 }
                 None => {
                     ui.weak("Drop .zip / .7z / .rar files anywhere to install them.");
@@ -570,6 +573,14 @@ impl App {
             }
         });
     }
+}
+
+/// Fit a modal to the window: caps its width at `width` and returns the
+/// height left for its scrolling body after the heading and button row.
+fn fit_modal(ui: &mut egui::Ui, width: f32) -> f32 {
+    let screen = ui.ctx().content_rect();
+    ui.set_max_width(width.min(screen.width() - 64.0).max(240.0));
+    (screen.height() - 150.0).max(80.0)
 }
 
 fn level_color(ui: &egui::Ui, level: Level) -> Color32 {
