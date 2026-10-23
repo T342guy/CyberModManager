@@ -86,7 +86,10 @@ impl App {
                         self.fw_picked.clear();
                     }
                 });
-                ui.weak("Ticking something that's already installed reinstalls it at the latest version.");
+                ui.weak(
+                    "Ticking something that's already installed updates it when a newer release is out \
+                     and skips it otherwise.",
+                );
             });
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {

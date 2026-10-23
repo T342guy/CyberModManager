@@ -312,6 +312,7 @@ pub fn spawn_nexus_install(api_key: String, req: NexusRequest, opts: InstallOpts
                 nexus: Some(NexusRef { mod_id: req.mod_id, file_id: Some(req.file_id) }),
                 github: None,
                 archive: Some(file_name),
+                replaces: Vec::new(),
             };
             jobs.send(Job::Install { item, path, meta, overwrite: opts.overwrite, delete_after: opts.delete_after })
                 .ok()
@@ -342,19 +343,35 @@ pub fn spawn_fetch_files(api_key: String, mod_id: u64, n: Notifier) {
     });
 }
 
+/// One framework to download, with the mod-list entries that already are it.
+pub struct FrameworkJob {
+    pub item: u64,
+    pub fw: &'static Framework,
+    /// Replaced by the new install, so files never end up listed twice.
+    pub existing: Vec<ModEntry>,
+}
+
 /// Download the latest GitHub release of each framework (already in
-/// dependency order) and queue the installs. `items` pairs each framework with
-/// its queue entry.
-pub fn spawn_framework_install(items: Vec<(u64, &'static Framework)>, opts: InstallOpts, jobs: Sender<Job>, n: Notifier) {
+/// dependency order) and queue the installs, skipping ones already on that
+/// release.
+pub fn spawn_framework_install(jobs_in: Vec<FrameworkJob>, opts: InstallOpts, jobs: Sender<Job>, n: Notifier) {
     std::thread::spawn(move || {
         let client = match crate::github::client() {
             Ok(c) => c,
             Err(e) => return n.log(Level::Error, format!("{e:#}")),
         };
-        for (item, fw) in items {
+        for FrameworkJob { item, fw, existing } in jobs_in {
             let result = (|| -> Result<()> {
                 n.item(item, ItemStatus::Downloading(0.0));
                 let release = crate::github::latest_release(&client, fw.repo)?;
+                if let [current] = existing.as_slice()
+                    && current.version.as_deref().is_some_and(|v| frameworks::same_version(v, &release.version()))
+                {
+                    n.item(item, ItemStatus::Done);
+                    let hint = if current.enabled { "" } else { " (it's disabled; enable it in the Mods tab)" };
+                    n.log(Level::Info, format!("{} {} is already installed{hint}, skipped", fw.name, release.version()));
+                    return Ok(());
+                }
                 let asset = frameworks::pick_asset(release.assets.iter().map(|a| a.name.as_str()))
                     .and_then(|name| release.assets.iter().find(|a| a.name == name))
                     .with_context(|| format!("no Windows .zip in the latest {} release ({})", fw.name, release.tag_name))?;
@@ -374,6 +391,7 @@ pub fn spawn_framework_install(items: Vec<(u64, &'static Framework)>, opts: Inst
                     nexus: None,
                     github: Some(GithubRef { repo: fw.repo.to_string(), tag: release.tag_name.clone() }),
                     archive: Some(asset.name.clone()),
+                    replaces: existing.iter().map(|m| m.id.clone()).collect(),
                 };
                 jobs.send(Job::Install { item, path, meta, overwrite: opts.overwrite, delete_after: opts.delete_after })
                     .ok()

@@ -3,6 +3,8 @@
 
 use std::path::Path;
 
+use crate::registry::ModEntry;
+
 #[derive(Debug)]
 pub struct Framework {
     pub name: &'static str,
@@ -144,6 +146,20 @@ pub fn pick_asset<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<&'a st
         .copied()
 }
 
+/// Every mod-list entry that is this framework, however it got installed:
+/// from its GitHub repo or Nexus page, under its name, or by providing its
+/// marker file (archives from Nexus and adopted files have other names).
+pub fn owners<'a>(mods: &'a [ModEntry], fw: &Framework) -> Vec<&'a ModEntry> {
+    mods.iter()
+        .filter(|m| {
+            m.github.as_ref().is_some_and(|g| g.repo.eq_ignore_ascii_case(fw.repo))
+                || m.nexus.as_ref().is_some_and(|n| n.mod_id == fw.nexus_id)
+                || m.name.eq_ignore_ascii_case(fw.name)
+                || m.files.iter().any(|f| f.eq_ignore_ascii_case(fw.marker))
+        })
+        .collect()
+}
+
 pub fn is_present(game: &Path, fw: &Framework) -> bool {
     game.join(crate::fsutil::fix_case(game, fw.marker)).is_file()
 }
@@ -210,6 +226,34 @@ mod tests {
             Some("redscript-v0.5.32-windows.zip")
         );
         assert_eq!(pick_asset(["notes.txt"]), None);
+    }
+
+    #[test]
+    fn owners_found_by_any_route() {
+        let entry = |id: &str, name: &str, files: &[&str]| ModEntry {
+            id: id.into(),
+            name: name.into(),
+            version: None,
+            nexus: None,
+            github: None,
+            archive: None,
+            enabled: true,
+            files: files.iter().map(|f| f.to_string()).collect(),
+            overridden: Vec::new(),
+            backed_up: Vec::new(),
+            installed_at: 0,
+        };
+        let tweak = by_name("TweakXL").unwrap();
+        let mut nexus = entry("a", "TweakXL 1.11.5", &[]);
+        nexus.nexus = Some(crate::registry::NexusRef { mod_id: tweak.nexus_id, file_id: None });
+        let mods = vec![
+            nexus,
+            entry("b", "untracked red4ext", &["red4ext/plugins/tweakxl/TweakXL.dll", "r6/scripts/x.reds"]),
+            entry("c", "tweakxl", &[]),
+            entry("d", "Something else", &["archive/pc/mod/x.archive"]),
+        ];
+        let ids: Vec<&str> = owners(&mods, tweak).iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 
     #[test]

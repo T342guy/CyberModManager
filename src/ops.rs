@@ -28,6 +28,8 @@ pub struct InstallMeta {
     pub nexus: Option<NexusRef>,
     pub github: Option<GithubRef>,
     pub archive: Option<String>,
+    /// Entries this install replaces even though their name differs.
+    pub replaces: Vec<String>,
 }
 
 impl InstallMeta {
@@ -103,7 +105,13 @@ pub fn install(dirs: &Dirs, reg: &mut Registry, archive: &Path, mut meta: Instal
     crate::archive::extract(archive, tmp.path())?;
     let plan = layout::plan(tmp.path(), &meta.name)?;
 
-    if let Some(old) = reg.find_same(&meta.name, meta.nexus.as_ref()) {
+    let mut previous: Vec<String> = meta.replaces.iter().filter(|id| reg.get(id).is_some()).cloned().collect();
+    if let Some(same) = reg.find_same(&meta.name, meta.nexus.as_ref())
+        && !previous.contains(&same)
+    {
+        previous.push(same);
+    }
+    for old in previous {
         // Keep a Nexus link the user set by hand; only the mod id still applies.
         if meta.nexus.is_none() {
             meta.nexus = reg.get(&old).and_then(|m| m.nexus.as_ref()).map(|n| NexusRef { mod_id: n.mod_id, file_id: None });
@@ -592,6 +600,21 @@ mod tests {
         install_enable(&mut env, &v1, false);
         assert_eq!(env.reg.mods.len(), 1);
         assert_eq!(env.reg.mods[0].nexus, Some(NexusRef { mod_id: 42, file_id: None }));
+    }
+
+    #[test]
+    fn replaces_differently_named_entries() {
+        let mut env = env();
+        let a = make_zip(&env, "TweakXL 1.11.4.zip", &[("red4ext/plugins/TweakXL/TweakXL.dll", "1")]);
+        let b = make_zip(&env, "tweak copy.zip", &[("red4ext/plugins/TweakXL/TweakXL.dll", "1")]);
+        let (first, _) = install_enable(&mut env, &a, false);
+        let (second, _) = install_enable(&mut env, &b, true);
+        let new = make_zip(&env, "TweakXL-1.11.5.zip", &[("red4ext/plugins/TweakXL/TweakXL.dll", "2")]);
+        let meta = InstallMeta { name: "TweakXL".into(), replaces: vec![first, second], ..Default::default() };
+        let id = install(&env.dirs, &mut env.reg, &new, meta).unwrap();
+        enable(&env.dirs, &mut env.reg, &id, false).unwrap();
+        assert_eq!(env.reg.mods.len(), 1);
+        assert_eq!(fs::read_to_string(env.dirs.game.join("red4ext/plugins/TweakXL/TweakXL.dll")).unwrap(), "2");
     }
 
     #[test]

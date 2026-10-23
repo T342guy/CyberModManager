@@ -322,16 +322,18 @@ impl App {
         if order.is_empty() {
             return;
         }
-        let items: Vec<_> = order.into_iter().map(|fw| (self.new_item(format!("{} (GitHub)", fw.name)), fw)).collect();
+        let items: Vec<_> = order.into_iter().map(|fw| self.framework_job(format!("{} (GitHub)", fw.name), fw)).collect();
         worker::spawn_framework_install(items, self.install_opts(), self.jobs.clone(), self.notifier.clone());
         self.tab = Tab::Install;
     }
 
+    fn framework_job(&mut self, label: String, fw: &'static crate::frameworks::Framework) -> worker::FrameworkJob {
+        let existing = crate::frameworks::owners(&self.mods, fw).into_iter().cloned().collect();
+        worker::FrameworkJob { item: self.new_item(label), fw, existing }
+    }
+
     fn framework_state(&self, fw: &crate::frameworks::Framework) -> FrameworkState {
-        let managed = self.mods.iter().find(|m| {
-            m.github.as_ref().is_some_and(|g| g.repo.eq_ignore_ascii_case(fw.repo)) || m.name.eq_ignore_ascii_case(fw.name)
-        });
-        match managed {
+        match crate::frameworks::owners(&self.mods, fw).first() {
             Some(m) => FrameworkState::Managed { version: m.version.clone(), enabled: m.enabled },
             None if self.config.game_dir.as_ref().is_some_and(|g| crate::frameworks::is_present(g, fw)) => {
                 FrameworkState::Unmanaged
@@ -348,8 +350,8 @@ impl App {
         let name = self.mods.iter().find(|m| m.id == entry_id).map(|m| m.name.clone());
         match u.source {
             UpdateSource::Github(fw) => {
-                let item = self.new_item(format!("Update {} (GitHub)", fw.name));
-                worker::spawn_framework_install(vec![(item, fw)], self.install_opts(), self.jobs.clone(), self.notifier.clone());
+                let job = self.framework_job(format!("Update {} (GitHub)", fw.name), fw);
+                worker::spawn_framework_install(vec![job], self.install_opts(), self.jobs.clone(), self.notifier.clone());
                 self.tab = Tab::Install;
                 true
             }
