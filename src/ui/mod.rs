@@ -1,3 +1,4 @@
+mod frameworks_view;
 mod install;
 mod mods_view;
 mod nexus_view;
@@ -16,7 +17,7 @@ use crate::nxm::NxmLink;
 use crate::ops::{Conflict, Dirs};
 use crate::paths::AppPaths;
 use crate::registry::ModEntry;
-use crate::worker::{self, Event, ItemStatus, Job, Level, Notifier, UpdateInfo};
+use crate::worker::{self, Event, ItemStatus, Job, Level, Notifier, UpdateInfo, UpdateSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -31,6 +32,14 @@ struct QueueItem {
     id: u64,
     label: String,
     status: ItemStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FrameworkState {
+    Managed { version: Option<String>, enabled: bool },
+    /// Found in the game folder but installed outside the manager.
+    Unmanaged,
+    Missing,
 }
 
 struct PendingConflict {
@@ -54,6 +63,11 @@ pub struct App {
     /// Scan results awaiting the user's pick: (name, files, selected).
     untracked: Option<Vec<(String, Vec<String>, bool)>>,
     conflicts: VecDeque<PendingConflict>,
+    /// Framework picker: open flag and the ticked framework names.
+    frameworks_open: bool,
+    fw_picked: Vec<&'static str>,
+    /// Nexus URL/ID typed into the details panel's "Link to Nexus" box.
+    link_input: String,
 
     queue: Vec<QueueItem>,
     next_item: u64,
@@ -66,6 +80,8 @@ pub struct App {
     nexus_input: String,
     nexus_files: Option<(u64, ModInfo, FileList)>,
     updates: HashMap<String, UpdateInfo>,
+    /// Run the startup update check once the mod list has loaded.
+    startup_check_pending: bool,
 
     game_running: bool,
     last_game_check: Instant,
@@ -103,6 +119,7 @@ impl App {
             notifier.send(Event::Nxm(link));
         }
 
+        let startup_check = config.check_updates_on_start;
         let mut app = Self {
             api_key_input: config.nexus_api_key.clone().unwrap_or_default(),
             paths,
@@ -117,6 +134,9 @@ impl App {
             confirm_remove: None,
             untracked: None,
             conflicts: VecDeque::new(),
+            frameworks_open: false,
+            fw_picked: Vec::new(),
+            link_input: String::new(),
             queue: Vec::new(),
             next_item: 0,
             log: Vec::new(),
@@ -125,6 +145,7 @@ impl App {
             nexus_input: String::new(),
             nexus_files: None,
             updates: HashMap::new(),
+            startup_check_pending: startup_check,
             game_running: false,
             last_game_check: Instant::now() - Duration::from_secs(60),
         };
@@ -183,8 +204,14 @@ impl App {
         while let Ok(ev) = self.events.try_recv() {
             match ev {
                 Event::Mods(mods) => {
-                    self.updates.retain(|id, _| mods.iter().any(|m| &m.id == id));
+                    // An update counts as applied once the entry is replaced or its version changes.
+                    self.updates.retain(|id, u| {
+                        mods.iter().any(|m| &m.id == id && (u.version.is_none() || m.version != u.version))
+                    });
                     self.mods = mods;
+                    if std::mem::take(&mut self.startup_check_pending) {
+                        self.check_updates(false);
+                    }
                 }
                 Event::Item { item, status } => {
                     if let Some(q) = self.queue.iter_mut().find(|q| q.id == item) {
@@ -237,7 +264,10 @@ impl App {
             .mods
             .iter()
             .find(|m| m.nexus.as_ref().is_some_and(|n| n.mod_id == parsed.mod_id && n.file_id.is_some())
-                && self.updates.get(&m.id).is_some_and(|u| u.file_id == Some(parsed.file_id)))
+                && self.updates.get(&m.id).is_some_and(|u| match u.source {
+                    UpdateSource::Nexus { file_id, .. } => file_id.is_none_or(|f| f == parsed.file_id),
+                    UpdateSource::Github(_) => false,
+                }))
             .map(|m| m.name.clone());
         let item = self.new_item(format!("Nexus mod {} / file {}", parsed.mod_id, parsed.file_id));
         self.start_nexus_install(key, worker::NexusRequest {
@@ -251,12 +281,94 @@ impl App {
     }
 
     fn start_nexus_install(&mut self, key: String, req: worker::NexusRequest) {
-        let opts = worker::InstallOpts {
+        worker::spawn_nexus_install(key, req, self.install_opts(), self.jobs.clone(), self.notifier.clone());
+    }
+
+    /// `manual` logs a hint when there is nothing that can be checked.
+    fn check_updates(&mut self, manual: bool) {
+        let key = self.config.nexus_api_key.clone().filter(|k| !k.trim().is_empty());
+        let checkable = self.mods.iter().any(|m| m.github.is_some() || (m.nexus.is_some() && key.is_some()));
+        if !checkable {
+            if manual {
+                self.push_log(
+                    Level::Info,
+                    "Nothing to check: install frameworks here, install from Nexus, or link mods to their Nexus page \
+                     (Nexus checks also need your API key).",
+                );
+            }
+            return;
+        }
+        worker::spawn_update_check(key, self.mods.clone(), self.notifier.clone());
+        self.push_log(Level::Info, "Checking for updates…");
+    }
+
+    fn install_opts(&self) -> worker::InstallOpts {
+        worker::InstallOpts {
             downloads: self.paths.downloads_dir(),
             overwrite: self.config.always_overwrite,
             delete_after: self.config.delete_downloads,
-        };
-        worker::spawn_nexus_install(key, req, opts, self.jobs.clone(), self.notifier.clone());
+        }
+    }
+
+    /// Install (or update) the named frameworks plus whatever they need that
+    /// isn't installed yet.
+    fn install_frameworks(&mut self, picked: &[&str]) {
+        let have: Vec<&str> = crate::frameworks::CATALOG
+            .iter()
+            .filter(|fw| self.framework_state(fw) != FrameworkState::Missing)
+            .map(|fw| fw.name)
+            .collect();
+        let order = crate::frameworks::install_order(picked, &have);
+        if order.is_empty() {
+            return;
+        }
+        let items: Vec<_> = order.into_iter().map(|fw| (self.new_item(format!("{} (GitHub)", fw.name)), fw)).collect();
+        worker::spawn_framework_install(items, self.install_opts(), self.jobs.clone(), self.notifier.clone());
+        self.tab = Tab::Install;
+    }
+
+    fn framework_state(&self, fw: &crate::frameworks::Framework) -> FrameworkState {
+        let managed = self.mods.iter().find(|m| {
+            m.github.as_ref().is_some_and(|g| g.repo.eq_ignore_ascii_case(fw.repo)) || m.name.eq_ignore_ascii_case(fw.name)
+        });
+        match managed {
+            Some(m) => FrameworkState::Managed { version: m.version.clone(), enabled: m.enabled },
+            None if self.config.game_dir.as_ref().is_some_and(|g| crate::frameworks::is_present(g, fw)) => {
+                FrameworkState::Unmanaged
+            }
+            None => FrameworkState::Missing,
+        }
+    }
+
+    /// Start the update for one mod. Returns false when it needs a manual
+    /// download on Nexus (free accounts / unknown file), in which case the
+    /// files page is opened if `open_page` is set.
+    fn apply_update(&mut self, ctx: &egui::Context, entry_id: &str, open_page: bool) -> bool {
+        let Some(u) = self.updates.get(entry_id).cloned() else { return false };
+        let name = self.mods.iter().find(|m| m.id == entry_id).map(|m| m.name.clone());
+        match u.source {
+            UpdateSource::Github(fw) => {
+                let item = self.new_item(format!("Update {} (GitHub)", fw.name));
+                worker::spawn_framework_install(vec![(item, fw)], self.install_opts(), self.jobs.clone(), self.notifier.clone());
+                self.tab = Tab::Install;
+                true
+            }
+            UpdateSource::Nexus { mod_id, file_id: Some(file_id) }
+                if self.nexus_user.as_ref().is_some_and(|u| u.is_premium) =>
+            {
+                let Some(key) = self.api_key() else { return false };
+                let item = self.new_item(format!("Update {}", name.clone().unwrap_or_default()));
+                self.start_nexus_install(key, worker::NexusRequest { item, mod_id, file_id, nxm_key: None, name });
+                self.tab = Tab::Install;
+                true
+            }
+            UpdateSource::Nexus { mod_id, .. } => {
+                if open_page {
+                    ctx.open_url(egui::OpenUrl::new_tab(format!("{}?tab=files", mods_view::nexus_page(mod_id))));
+                }
+                false
+            }
+        }
     }
 
     fn conflict_dialog(&mut self, ctx: &egui::Context) {
@@ -440,6 +552,7 @@ impl eframe::App for App {
         self.conflict_dialog(&ctx);
         self.remove_dialog(&ctx);
         self.untracked_dialog(&ctx);
+        self.frameworks_dialog(&ctx);
     }
 }
 

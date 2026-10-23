@@ -1,7 +1,9 @@
 mod archive;
 mod config;
+mod frameworks;
 mod fsutil;
 mod game;
+mod github;
 mod layout;
 mod nexus;
 mod nxm;

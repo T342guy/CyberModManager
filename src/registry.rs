@@ -11,12 +11,21 @@ pub struct NexusRef {
     pub file_id: Option<u64>,
 }
 
+/// Installed from a GitHub release (the built-in frameworks).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubRef {
+    pub repo: String,
+    pub tag: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModEntry {
     pub id: String,
     pub name: String,
     pub version: Option<String>,
     pub nexus: Option<NexusRef>,
+    #[serde(default)]
+    pub github: Option<GithubRef>,
     /// Archive file name the mod was installed from.
     pub archive: Option<String>,
     pub enabled: bool,

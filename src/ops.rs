@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::fsutil::{fix_case, move_file, prune_empty_dirs, remove_empty_tree, safe_join};
 use crate::layout::{self, PROTECTED_DIRS};
-use crate::registry::{ModEntry, NexusRef, Registry};
+use crate::registry::{GithubRef, ModEntry, NexusRef, Registry};
 
 #[derive(Debug, Clone)]
 pub struct Dirs {
@@ -26,6 +26,7 @@ pub struct InstallMeta {
     pub name: String,
     pub version: Option<String>,
     pub nexus: Option<NexusRef>,
+    pub github: Option<GithubRef>,
     pub archive: Option<String>,
 }
 
@@ -92,7 +93,7 @@ fn now() -> u64 {
 
 /// Extract `archive` and register it as a (disabled) mod parked in holding.
 /// An existing install of the same mod is removed first. Returns the new id.
-pub fn install(dirs: &Dirs, reg: &mut Registry, archive: &Path, meta: InstallMeta) -> Result<String> {
+pub fn install(dirs: &Dirs, reg: &mut Registry, archive: &Path, mut meta: InstallMeta) -> Result<String> {
     fs::create_dir_all(&dirs.staging)?;
     clean_staging(&dirs.staging);
     let tmp = tempfile::Builder::new()
@@ -103,6 +104,10 @@ pub fn install(dirs: &Dirs, reg: &mut Registry, archive: &Path, meta: InstallMet
     let plan = layout::plan(tmp.path(), &meta.name)?;
 
     if let Some(old) = reg.find_same(&meta.name, meta.nexus.as_ref()) {
+        // Keep a Nexus link the user set by hand; only the mod id still applies.
+        if meta.nexus.is_none() {
+            meta.nexus = reg.get(&old).and_then(|m| m.nexus.as_ref()).map(|n| NexusRef { mod_id: n.mod_id, file_id: None });
+        }
         remove(dirs, reg, &old).with_context(|| format!("removing previous version of {}", meta.name))?;
     }
 
@@ -126,6 +131,7 @@ pub fn install(dirs: &Dirs, reg: &mut Registry, archive: &Path, meta: InstallMet
         name: meta.name,
         version: meta.version,
         nexus: meta.nexus,
+        github: meta.github,
         archive: meta.archive,
         enabled: false,
         files,
@@ -342,6 +348,7 @@ pub fn adopt(reg: &mut Registry, name: &str, mut files: Vec<String>) -> Result<S
         name: name.to_string(),
         version: None,
         nexus: None,
+        github: None,
         archive: None,
         enabled: true,
         files,
@@ -574,6 +581,17 @@ mod tests {
         assert_eq!(env.reg.mods[0].version.as_deref(), Some("2.0"));
         assert!(read(&env, "archive/pc/mod/old.archive").is_none());
         assert_eq!(read(&env, "archive/pc/mod/new.archive").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn reinstall_keeps_manual_nexus_link() {
+        let mut env = env();
+        let v1 = make_zip(&env, "Thing.zip", &[("archive/pc/mod/a.archive", "1")]);
+        let (id, _) = install_enable(&mut env, &v1, false);
+        env.reg.get_mut(&id).unwrap().nexus = Some(NexusRef { mod_id: 42, file_id: Some(7) });
+        install_enable(&mut env, &v1, false);
+        assert_eq!(env.reg.mods.len(), 1);
+        assert_eq!(env.reg.mods[0].nexus, Some(NexusRef { mod_id: 42, file_id: None }));
     }
 
     #[test]

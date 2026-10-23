@@ -65,7 +65,10 @@ impl App {
         if ui.checkbox(&mut self.config.always_overwrite, "Newer mods overwrite conflicting files without asking").changed() {
             self.save_config();
         }
-        if ui.checkbox(&mut self.config.delete_downloads, "Delete Nexus downloads after installing").changed() {
+        if ui.checkbox(&mut self.config.delete_downloads, "Delete downloads after installing").changed() {
+            self.save_config();
+        }
+        if ui.checkbox(&mut self.config.check_updates_on_start, "Check for mod updates when the app starts").changed() {
             self.save_config();
         }
 

@@ -50,13 +50,12 @@ impl App {
         ui.heading("Updates");
         ui.horizontal(|ui| {
             let tracked = self.mods.iter().filter(|m| m.nexus.is_some()).count();
-            if ui.button("Check for updates").clicked()
-                && let Some(key) = self.api_key()
-            {
-                worker::spawn_update_check(key, self.mods.clone(), self.notifier.clone());
-                self.push_log(Level::Info, "Checking Nexus for updates…");
+            if ui.button("Check for updates").clicked() {
+                self.check_updates(true);
             }
-            ui.weak(format!("{tracked} installed mods are linked to Nexus."));
+            ui.weak(format!(
+                "{tracked} installed mods are linked to Nexus. Link others from their details panel on the Mods tab."
+            ));
         });
         let mut open = None;
         for u in self.updates.values() {

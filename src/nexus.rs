@@ -155,38 +155,34 @@ impl Nexus {
         })?;
         links.into_iter().next().map(|l| l.uri).context("Nexus returned no download links")
     }
+}
 
-    /// Download `url` into `dir/file_name`, reporting (downloaded, total) bytes.
-    pub fn download(
-        &self,
-        url: &str,
-        dir: &Path,
-        file_name: &str,
-        mut progress: impl FnMut(u64, Option<u64>),
-    ) -> Result<PathBuf> {
-        std::fs::create_dir_all(dir)?;
-        let name = Path::new(file_name).file_name().context("bad file name")?;
-        let dest = dir.join(name);
-        let part = dest.with_extension("part");
-        // CDN links are pre-signed; don't send the API key to them.
-        let mut resp = check(Client::new().get(url).send().context("starting download")?)?;
-        let total = resp.content_length();
-        let mut out = File::create(&part)?;
-        let mut buf = vec![0u8; 256 * 1024];
-        let mut done = 0u64;
-        loop {
-            let n = resp.read(&mut buf).context("download interrupted")?;
-            if n == 0 {
-                break;
-            }
-            out.write_all(&buf[..n])?;
-            done += n as u64;
-            progress(done, total);
+/// Download `url` into `dir/file_name`, reporting (downloaded, total) bytes.
+/// Used for pre-signed Nexus CDN links and GitHub release assets, so no API
+/// key is sent.
+pub fn download(url: &str, dir: &Path, file_name: &str, mut progress: impl FnMut(u64, Option<u64>)) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let name = Path::new(file_name).file_name().context("bad file name")?;
+    let dest = dir.join(name);
+    let part = dest.with_extension("part");
+    let client = Client::builder().user_agent(concat!("CyberModManager/", env!("CARGO_PKG_VERSION"))).build()?;
+    let mut resp = client.get(url).send().context("starting download")?.error_for_status().context("download failed")?;
+    let total = resp.content_length();
+    let mut out = File::create(&part)?;
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut done = 0u64;
+    loop {
+        let n = resp.read(&mut buf).context("download interrupted")?;
+        if n == 0 {
+            break;
         }
-        out.flush()?;
-        std::fs::rename(&part, &dest)?;
-        Ok(dest)
+        out.write_all(&buf[..n])?;
+        done += n as u64;
+        progress(done, total);
     }
+    out.flush()?;
+    std::fs::rename(&part, &dest)?;
+    Ok(dest)
 }
 
 fn check(resp: Response) -> Result<Response> {

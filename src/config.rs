@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Cyberpunk 2077 install folder (the one containing `bin/` and `archive/`).
@@ -16,6 +16,21 @@ pub struct Config {
     pub always_overwrite: bool,
     /// Delete downloaded archives after a successful Nexus install.
     pub delete_downloads: bool,
+    /// Look for mod updates (GitHub frameworks, Nexus-linked mods) at startup.
+    pub check_updates_on_start: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            game_dir: None,
+            holding_dir: None,
+            nexus_api_key: None,
+            always_overwrite: false,
+            delete_downloads: false,
+            check_updates_on_start: true,
+        }
+    }
 }
 
 impl Config {

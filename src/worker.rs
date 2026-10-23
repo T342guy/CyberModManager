@@ -7,9 +7,10 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use anyhow::{Context, Result};
 
+use crate::frameworks::{self, Framework};
 use crate::nexus::{FileList, ModInfo, Nexus, User};
 use crate::ops::{self, Conflict, Dirs, EnableOutcome, InstallMeta};
-use crate::registry::{ModEntry, NexusRef, Registry};
+use crate::registry::{GithubRef, ModEntry, NexusRef, Registry};
 
 pub enum Job {
     Install { item: u64, path: PathBuf, meta: InstallMeta, overwrite: bool, delete_after: bool },
@@ -19,6 +20,8 @@ pub enum Job {
     DisableAll,
     ScanUntracked,
     Adopt(Vec<(String, Vec<String>)>),
+    /// Link (or with `None`, unlink) a mod to a Nexus mod page for update checks.
+    LinkNexus { id: String, mod_id: Option<u64> },
     SetDirs(Dirs),
     RelocateHolding { from: PathBuf, to: PathBuf },
 }
@@ -41,11 +44,17 @@ pub enum Level {
 }
 
 #[derive(Debug, Clone)]
+pub enum UpdateSource {
+    /// `file_id` is the replacement file when Nexus knows it.
+    Nexus { mod_id: u64, file_id: Option<u64> },
+    Github(&'static Framework),
+}
+
+#[derive(Debug, Clone)]
 pub struct UpdateInfo {
     pub entry_id: String,
-    pub mod_id: u64,
-    pub file_id: Option<u64>,
     pub version: Option<String>,
+    pub source: UpdateSource,
 }
 
 pub enum Event {
@@ -190,6 +199,17 @@ impl Worker {
                 }
                 self.n.log(Level::Info, format!("Adopted {adopted} untracked mod(s)"));
             }
+            Job::LinkNexus { id, mod_id } => {
+                let reg = self.reg.as_mut().context("Mod list failed to load")?;
+                let m = reg.get_mut(&id).context("mod not found")?;
+                m.nexus = mod_id.map(|mod_id| NexusRef { mod_id, file_id: None });
+                let name = m.name.clone();
+                reg.save()?;
+                match mod_id {
+                    Some(mod_id) => self.n.log(Level::Info, format!("Linked {name} to Nexus mod {mod_id}")),
+                    None => self.n.log(Level::Info, format!("Unlinked {name} from Nexus")),
+                }
+            }
             Job::DisableAll => {
                 let (dirs, reg) = self.ctx()?;
                 // Newest first so parked files unwind cleanly.
@@ -268,7 +288,7 @@ pub fn spawn_nexus_install(api_key: String, req: NexusRequest, opts: InstallOpts
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| format!("{}-{}.zip", req.mod_id, req.file_id));
             let mut last = -1.0f32;
-            let path = nx.download(&url, &opts.downloads, &file_name, |done, total| {
+            let path = crate::nexus::download(&url, &opts.downloads, &file_name, |done, total| {
                 if let Some(total) = total.filter(|t| *t > 0) {
                     let frac = done as f32 / total as f32;
                     if frac - last >= 0.01 {
@@ -290,6 +310,7 @@ pub fn spawn_nexus_install(api_key: String, req: NexusRequest, opts: InstallOpts
                 name,
                 version: file.as_ref().and_then(|f| f.version.clone()).or(info.and_then(|i| i.version)),
                 nexus: Some(NexusRef { mod_id: req.mod_id, file_id: Some(req.file_id) }),
+                github: None,
                 archive: Some(file_name),
             };
             jobs.send(Job::Install { item, path, meta, overwrite: opts.overwrite, delete_after: opts.delete_after })
@@ -321,47 +342,125 @@ pub fn spawn_fetch_files(api_key: String, mod_id: u64, n: Notifier) {
     });
 }
 
-pub fn spawn_update_check(api_key: String, mods: Vec<ModEntry>, n: Notifier) {
+/// Download the latest GitHub release of each framework (already in
+/// dependency order) and queue the installs. `items` pairs each framework with
+/// its queue entry.
+pub fn spawn_framework_install(items: Vec<(u64, &'static Framework)>, opts: InstallOpts, jobs: Sender<Job>, n: Notifier) {
     std::thread::spawn(move || {
-        let nx = match Nexus::new(&api_key) {
+        let client = match crate::github::client() {
+            Ok(c) => c,
+            Err(e) => return n.log(Level::Error, format!("{e:#}")),
+        };
+        for (item, fw) in items {
+            let result = (|| -> Result<()> {
+                n.item(item, ItemStatus::Downloading(0.0));
+                let release = crate::github::latest_release(&client, fw.repo)?;
+                let asset = frameworks::pick_asset(release.assets.iter().map(|a| a.name.as_str()))
+                    .and_then(|name| release.assets.iter().find(|a| a.name == name))
+                    .with_context(|| format!("no Windows .zip in the latest {} release ({})", fw.name, release.tag_name))?;
+                let mut last = -1.0f32;
+                let path = crate::nexus::download(&asset.browser_download_url, &opts.downloads, &asset.name, |done, total| {
+                    if let Some(total) = total.filter(|t| *t > 0) {
+                        let frac = done as f32 / total as f32;
+                        if frac - last >= 0.01 {
+                            last = frac;
+                            n.item(item, ItemStatus::Downloading(frac));
+                        }
+                    }
+                })?;
+                let meta = InstallMeta {
+                    name: fw.name.to_string(),
+                    version: Some(release.version()),
+                    nexus: None,
+                    github: Some(GithubRef { repo: fw.repo.to_string(), tag: release.tag_name.clone() }),
+                    archive: Some(asset.name.clone()),
+                };
+                jobs.send(Job::Install { item, path, meta, overwrite: opts.overwrite, delete_after: opts.delete_after })
+                    .ok()
+                    .context("worker stopped")
+            })();
+            if let Err(e) = result {
+                n.item(item, ItemStatus::Failed(format!("{e:#}")));
+                n.log(Level::Error, format!("Downloading {} failed: {e:#}", fw.name));
+            }
+        }
+    });
+}
+
+/// Check every mod that came from GitHub (always) or is linked to Nexus (when
+/// an API key is set).
+pub fn spawn_update_check(api_key: Option<String>, mods: Vec<ModEntry>, n: Notifier) {
+    std::thread::spawn(move || {
+        let nx = match api_key.as_deref().map(Nexus::new).transpose() {
             Ok(nx) => nx,
             Err(e) => return n.log(Level::Error, format!("{e:#}")),
         };
+        let gh = crate::github::client().ok();
         let mut updates = Vec::new();
         let mut checked = 0;
+        let mut skipped = 0;
         for m in mods {
-            let Some(nexus) = &m.nexus else { continue };
-            checked += 1;
-            let found = (|| -> Result<Option<UpdateInfo>> {
-                let list = nx.files(nexus.mod_id)?;
-                if let Some(fid) = nexus.file_id {
-                    return Ok(list.newest_replacement(fid).map(|f| UpdateInfo {
+            let found = if let Some(g) = &m.github {
+                let (Some(gh), Some(fw)) = (&gh, frameworks::by_repo(&g.repo)) else { continue };
+                checked += 1;
+                crate::github::latest_release(gh, fw.repo).map(|r| {
+                    (!frameworks::same_version(&r.tag_name, &g.tag)).then(|| UpdateInfo {
                         entry_id: m.id.clone(),
-                        mod_id: nexus.mod_id,
-                        file_id: Some(f.file_id),
-                        version: f.version.clone(),
-                    }));
-                }
-                // Installed from a local archive: compare against the mod page version.
-                let info = nx.mod_info(nexus.mod_id)?;
-                let newer = match (&info.version, &m.version) {
-                    (Some(latest), Some(mine)) => latest.trim_start_matches('v') != mine.trim_start_matches('v'),
-                    _ => false,
+                        version: Some(r.version()),
+                        source: UpdateSource::Github(fw),
+                    })
+                })
+            } else if let Some(nexus) = &m.nexus {
+                let Some(nx) = &nx else {
+                    skipped += 1;
+                    continue;
                 };
-                Ok(newer.then(|| UpdateInfo {
-                    entry_id: m.id.clone(),
-                    mod_id: nexus.mod_id,
-                    file_id: None,
-                    version: info.version.clone(),
-                }))
-            })();
+                checked += 1;
+                nexus_update(nx, &m, nexus)
+            } else {
+                continue;
+            };
             match found {
                 Ok(Some(u)) => updates.push(u),
                 Ok(None) => {}
                 Err(e) => n.log(Level::Warn, format!("Update check for {} failed: {e:#}", m.name)),
             }
         }
-        n.log(Level::Info, format!("Checked {checked} Nexus mods, {} update(s) available", updates.len()));
+        let mut msg = format!("Checked {checked} mods for updates, {} available", updates.len());
+        if skipped > 0 {
+            msg.push_str(&format!(" ({skipped} Nexus mods skipped: add your API key on the Nexus tab)"));
+        }
+        n.log(Level::Info, msg);
         n.send(Event::Updates(updates));
     });
+}
+
+fn nexus_update(nx: &Nexus, m: &ModEntry, nexus: &NexusRef) -> Result<Option<UpdateInfo>> {
+    let list = nx.files(nexus.mod_id)?;
+    let update = |file_id: Option<u64>, version: Option<String>| UpdateInfo {
+        entry_id: m.id.clone(),
+        version,
+        source: UpdateSource::Nexus { mod_id: nexus.mod_id, file_id },
+    };
+    if let Some(fid) = nexus.file_id {
+        return Ok(list.newest_replacement(fid).map(|f| update(Some(f.file_id), f.version.clone())));
+    }
+    match &m.version {
+        // Installed from a local archive: compare against the mod page version.
+        Some(mine) => {
+            let info = nx.mod_info(nexus.mod_id)?;
+            Ok(info
+                .version
+                .filter(|latest| !frameworks::same_version(latest, mine))
+                .map(|latest| update(None, Some(latest))))
+        }
+        // Version unknown (adopted or linked by hand): any main file uploaded
+        // after we started tracking the mod counts as an update.
+        None => Ok(list
+            .files
+            .iter()
+            .filter(|f| f.category_name.as_deref() == Some("MAIN") && f.uploaded_timestamp > m.installed_at)
+            .max_by_key(|f| f.uploaded_timestamp)
+            .map(|f| update(None, f.version.clone()))),
+    }
 }
